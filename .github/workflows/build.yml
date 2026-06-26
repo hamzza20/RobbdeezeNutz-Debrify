@@ -58,8 +58,8 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
-    # FIX 1: Bump compileSdk to 36 — flutter_sharing_intent requires SDK 36+
-    # Handles literal ints (compileSdk = 35) AND flutter variable (compileSdk = flutter.compileSdkVersion)
+    # FIX: Bump compileSdk to 36 — flutter_sharing_intent requires SDK 36+
+    # Handles literal ints AND flutter.compileSdkVersion variable
     - name: Patch compileSdk to 36
       run: |
         python3 - << 'PYEOF'
@@ -81,11 +81,11 @@ jobs:
             sys.exit(1)
         PYEOF
 
-    # FIX 2: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
+    # FIX: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
     - name: Patch activeThumbColor in iptv_pt_screen.dart
       run: |
-        python3 - << 'EOF'
-        import re, pathlib
+        python3 - << 'PYEOF'
+        import re, pathlib, sys
         f = pathlib.Path("lib/features/iptv/portal_search/screens/iptv_pt_screen.dart")
         text = f.read_text()
         old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
@@ -98,15 +98,32 @@ jobs:
         f.write_text(patched)
         print(f"activeThumbColor replacements made: {n}")
         if n == 0:
-            print("WARNING: No activeThumbColor match found — showing all Switch/thumb lines:")
+            print("WARNING: No match — showing Switch/thumb lines:")
             for i, line in enumerate(text.splitlines(), 1):
                 if 'activeThumbColor' in line or 'ThumbColor' in line or 'Switch(' in line:
                     print(f"  line {i}: {line.rstrip()}")
-            import sys; sys.exit(1)
-        EOF
+            sys.exit(1)
+        PYEOF
 
+    # FIX: Robust keystore decode — strips whitespace/newlines that corrupt base64
+    # "Tag number over 30 is not supported" = the decoded file is garbled,
+    # caused by extra newlines or spaces in the secret value.
     - name: Decode keystore
-      run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+      run: |
+        echo "${{ secrets.KEYSTORE_BASE64 }}" \
+          | tr -d '[:space:]' \
+          | base64 -d > android/app/release.keystore
+        # Verify it looks like a Java KeyStore (magic bytes 0xFEEDFEED or 0XCECECECE)
+        python3 -c "
+        data = open('android/app/release.keystore','rb').read(4)
+        magic = data.hex()
+        print(f'Keystore magic bytes: {magic}')
+        if magic not in ('feedfeed', 'cececece'):
+            print('WARNING: Unexpected magic — keystore may be corrupt or wrong format')
+            print('Expected feedfeed (JKS) or cececece (PKCS12)')
+            import sys; sys.exit(1)
+        print('Keystore looks valid.')
+        "
 
     - name: Create key.properties
       run: |
@@ -154,6 +171,30 @@ jobs:
 
     - name: Get dependencies
       run: flutter pub get
+
+    # FIX: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
+    - name: Patch activeThumbColor in iptv_pt_screen.dart
+      run: |
+        python3 - << 'PYEOF'
+        import re, pathlib, sys
+        f = pathlib.Path("lib/features/iptv/portal_search/screens/iptv_pt_screen.dart")
+        text = f.read_text()
+        old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
+        new = (
+            "thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {"
+            " if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF);"
+            " return null; }),"
+        )
+        patched, n = old.subn(new, text)
+        f.write_text(patched)
+        print(f"activeThumbColor replacements made: {n}")
+        if n == 0:
+            print("WARNING: No match — showing Switch/thumb lines:")
+            for i, line in enumerate(text.splitlines(), 1):
+                if 'activeThumbColor' in line or 'ThumbColor' in line or 'Switch(' in line:
+                    print(f"  line {i}: {line.rstrip()}")
+            sys.exit(1)
+        PYEOF
 
     - name: Build macOS app
       run: flutter build macos --release
@@ -234,21 +275,22 @@ jobs:
     - name: Patch activeThumbColor in iptv_pt_screen.dart
       run: |
         python3 -c "
-        import re, pathlib
+        import re, pathlib, sys
         f = pathlib.Path('lib/features/iptv/portal_search/screens/iptv_pt_screen.dart')
         text = f.read_text()
         old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
         new = ('thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {'
                ' if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF);'
-               ' return null; }),')
+               ' return None; }),')
         patched, n = old.subn(new, text)
         f.write_text(patched)
         print(f'activeThumbColor replacements made: {n}')
         if n == 0:
+            print('WARNING: No match')
             for i, line in enumerate(text.splitlines(), 1):
-                if 'activeThumbColor' in line or 'ThumbColor' in line:
+                if 'activeThumbColor' in line or 'ThumbColor' in line or 'Switch(' in line:
                     print(f'  line {i}: {line.rstrip()}')
-            import sys; sys.exit(1)
+            sys.exit(1)
         "
 
     - name: Build Windows app
@@ -297,8 +339,8 @@ jobs:
     # FIX: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
     - name: Patch activeThumbColor in iptv_pt_screen.dart
       run: |
-        python3 - << 'EOF'
-        import re, pathlib
+        python3 - << 'PYEOF'
+        import re, pathlib, sys
         f = pathlib.Path("lib/features/iptv/portal_search/screens/iptv_pt_screen.dart")
         text = f.read_text()
         old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
@@ -311,11 +353,12 @@ jobs:
         f.write_text(patched)
         print(f"activeThumbColor replacements made: {n}")
         if n == 0:
+            print("WARNING: No match — showing Switch/thumb lines:")
             for i, line in enumerate(text.splitlines(), 1):
-                if 'activeThumbColor' in line or 'ThumbColor' in line:
+                if 'activeThumbColor' in line or 'ThumbColor' in line or 'Switch(' in line:
                     print(f"  line {i}: {line.rstrip()}")
-            import sys; sys.exit(1)
-        EOF
+            sys.exit(1)
+        PYEOF
 
     - name: Build iOS (unsigned)
       run: flutter build ios --release --no-codesign
@@ -377,28 +420,46 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
+    # FIX: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
+    - name: Patch activeThumbColor in iptv_pt_screen.dart
+      run: |
+        python3 - << 'PYEOF'
+        import re, pathlib, sys
+        f = pathlib.Path("lib/features/iptv/portal_search/screens/iptv_pt_screen.dart")
+        text = f.read_text()
+        old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
+        new = (
+            "thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {"
+            " if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF);"
+            " return null; }),"
+        )
+        patched, n = old.subn(new, text)
+        f.write_text(patched)
+        print(f"activeThumbColor replacements made: {n}")
+        if n == 0:
+            print("WARNING: No match — showing Switch/thumb lines:")
+            for i, line in enumerate(text.splitlines(), 1):
+                if 'activeThumbColor' in line or 'ThumbColor' in line or 'Switch(' in line:
+                    print(f"  line {i}: {line.rstrip()}")
+            sys.exit(1)
+        PYEOF
+
     - name: Build Linux app
       run: flutter build linux --release
 
     - name: Create AppImage
       run: |
-        # Download appimagetool
         wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
         chmod +x appimagetool-x86_64.AppImage
 
-        # Create AppDir structure
         mkdir -p AppDir/usr/bin
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         mkdir -p AppDir/usr/share/applications
 
-        # Copy built app
         cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
-
-        # Copy icon
         cp assets/app_icon.png AppDir/usr/share/icons/hicolor/256x256/apps/debrify.png
         cp assets/app_icon.png AppDir/debrify.png
 
-        # Create desktop file
         cat > AppDir/debrify.desktop << 'EOF'
         [Desktop Entry]
         Name=Debrify
@@ -411,7 +472,6 @@ jobs:
 
         cp AppDir/debrify.desktop AppDir/usr/share/applications/
 
-        # Create AppRun
         cat > AppDir/AppRun << 'EOF'
         #!/bin/bash
         SELF=$(readlink -f "$0")
@@ -422,7 +482,6 @@ jobs:
         EOF
         chmod +x AppDir/AppRun
 
-        # Build AppImage
         VERSION="${{ github.event.release.tag_name }}"
         if [ -z "$VERSION" ]; then VERSION="dev"; fi
         ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir debrify-${VERSION}-x86_64.AppImage
@@ -472,28 +531,46 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
+    # FIX: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
+    - name: Patch activeThumbColor in iptv_pt_screen.dart
+      run: |
+        python3 - << 'PYEOF'
+        import re, pathlib, sys
+        f = pathlib.Path("lib/features/iptv/portal_search/screens/iptv_pt_screen.dart")
+        text = f.read_text()
+        old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
+        new = (
+            "thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {"
+            " if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF);"
+            " return null; }),"
+        )
+        patched, n = old.subn(new, text)
+        f.write_text(patched)
+        print(f"activeThumbColor replacements made: {n}")
+        if n == 0:
+            print("WARNING: No match — showing Switch/thumb lines:")
+            for i, line in enumerate(text.splitlines(), 1):
+                if 'activeThumbColor' in line or 'ThumbColor' in line or 'Switch(' in line:
+                    print(f"  line {i}: {line.rstrip()}")
+            sys.exit(1)
+        PYEOF
+
     - name: Build Linux app
       run: flutter build linux --release
 
     - name: Create AppImage
       run: |
-        # Download appimagetool for aarch64
         wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage
         chmod +x appimagetool-aarch64.AppImage
 
-        # Create AppDir structure
         mkdir -p AppDir/usr/bin
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         mkdir -p AppDir/usr/share/applications
 
-        # Copy built app (arm64 path)
         cp -r build/linux/arm64/release/bundle/* AppDir/usr/bin/
-
-        # Copy icon
         cp assets/app_icon.png AppDir/usr/share/icons/hicolor/256x256/apps/debrify.png
         cp assets/app_icon.png AppDir/debrify.png
 
-        # Create desktop file
         cat > AppDir/debrify.desktop << 'EOF'
         [Desktop Entry]
         Name=Debrify
@@ -506,7 +583,6 @@ jobs:
 
         cp AppDir/debrify.desktop AppDir/usr/share/applications/
 
-        # Create AppRun
         cat > AppDir/AppRun << 'EOF'
         #!/bin/bash
         SELF=$(readlink -f "$0")
@@ -517,7 +593,6 @@ jobs:
         EOF
         chmod +x AppDir/AppRun
 
-        # Build AppImage
         VERSION="${{ github.event.release.tag_name }}"
         if [ -z "$VERSION" ]; then VERSION="dev"; fi
 
