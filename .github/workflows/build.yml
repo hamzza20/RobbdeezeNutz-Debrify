@@ -58,12 +58,52 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
-    # FIX: Bump compileSdk to 36 so flutter_sharing_intent can compile
+    # FIX 1: Bump compileSdk to 36 — flutter_sharing_intent requires SDK 36+
+    # Handles literal ints (compileSdk = 35) AND flutter variable (compileSdk = flutter.compileSdkVersion)
     - name: Patch compileSdk to 36
       run: |
-        sed -i 's/compileSdk = 35/compileSdk = 36/' android/app/build.gradle.kts
-        echo "--- android/app/build.gradle.kts (compileSdk line) ---"
-        grep 'compileSdk' android/app/build.gradle.kts
+        python3 - << 'PYEOF'
+        import re, pathlib, sys
+        f = pathlib.Path("android/app/build.gradle.kts")
+        text = f.read_text()
+        print("=== Before patch (compileSdk lines) ===")
+        for i, line in enumerate(text.splitlines(), 1):
+            if "compileSdk" in line:
+                print(f"  line {i}: {line.rstrip()}")
+        patched, n = re.subn(r"compileSdk\s*=\s*[^\n]+", "compileSdk = 36", text)
+        f.write_text(patched)
+        print(f"=== After patch ({n} replacement(s)) ===")
+        for i, line in enumerate(patched.splitlines(), 1):
+            if "compileSdk" in line:
+                print(f"  line {i}: {line.rstrip()}")
+        if n == 0:
+            print("WARNING: No compileSdk line found in build.gradle.kts!")
+            sys.exit(1)
+        PYEOF
+
+    # FIX 2: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
+    - name: Patch activeThumbColor in iptv_pt_screen.dart
+      run: |
+        python3 - << 'EOF'
+        import re, pathlib
+        f = pathlib.Path("lib/features/iptv/portal_search/screens/iptv_pt_screen.dart")
+        text = f.read_text()
+        old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
+        new = (
+            "thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {"
+            " if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF);"
+            " return null; }),"
+        )
+        patched, n = old.subn(new, text)
+        f.write_text(patched)
+        print(f"activeThumbColor replacements made: {n}")
+        if n == 0:
+            print("WARNING: No activeThumbColor match found — showing all Switch/thumb lines:")
+            for i, line in enumerate(text.splitlines(), 1):
+                if 'activeThumbColor' in line or 'ThumbColor' in line or 'Switch(' in line:
+                    print(f"  line {i}: {line.rstrip()}")
+            import sys; sys.exit(1)
+        EOF
 
     - name: Decode keystore
       run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
@@ -190,18 +230,26 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
-    # FIX: Replace activeThumbColor with WidgetStateProperty-based thumbColor
-    # activeThumbColor was removed in Flutter 3.x; use thumbColor with WidgetStateProperty instead
+    # FIX: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
     - name: Patch activeThumbColor in iptv_pt_screen.dart
-      shell: pwsh
       run: |
-        $file = "lib/features/iptv/portal_search/screens/iptv_pt_screen.dart"
-        $content = Get-Content $file -Raw
-        $content = $content -replace `
-          'activeThumbColor:\s*const Color\(0xFF00E5FF\),', `
-          'thumbColor: WidgetStateProperty.resolveWith<Color?>((states) { if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF); return null; }),'
-        Set-Content $file $content
-        Write-Host "Patch applied."
+        python3 -c "
+        import re, pathlib
+        f = pathlib.Path('lib/features/iptv/portal_search/screens/iptv_pt_screen.dart')
+        text = f.read_text()
+        old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
+        new = ('thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {'
+               ' if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF);'
+               ' return null; }),')
+        patched, n = old.subn(new, text)
+        f.write_text(patched)
+        print(f'activeThumbColor replacements made: {n}')
+        if n == 0:
+            for i, line in enumerate(text.splitlines(), 1):
+                if 'activeThumbColor' in line or 'ThumbColor' in line:
+                    print(f'  line {i}: {line.rstrip()}')
+            import sys; sys.exit(1)
+        "
 
     - name: Build Windows app
       run: flutter build windows --release
@@ -246,14 +294,28 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
-    # FIX: Replace activeThumbColor with WidgetStateProperty-based thumbColor
-    # activeThumbColor was removed in Flutter 3.x; use thumbColor with WidgetStateProperty instead
+    # FIX: Replace activeThumbColor (removed in Flutter 3.x) with WidgetStateProperty thumbColor
     - name: Patch activeThumbColor in iptv_pt_screen.dart
       run: |
-        sed -i '' \
-          's/activeThumbColor: const Color(0xFF00E5FF),/thumbColor: WidgetStateProperty.resolveWith<Color?>((states) { if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF); return null; }),/' \
-          lib/features/iptv/portal_search/screens/iptv_pt_screen.dart
-        echo "Patch applied."
+        python3 - << 'EOF'
+        import re, pathlib
+        f = pathlib.Path("lib/features/iptv/portal_search/screens/iptv_pt_screen.dart")
+        text = f.read_text()
+        old = re.compile(r'activeThumbColor:\s*const Color\(0xFF00E5FF\),')
+        new = (
+            "thumbColor: WidgetStateProperty.resolveWith<Color?>((states) {"
+            " if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF);"
+            " return null; }),"
+        )
+        patched, n = old.subn(new, text)
+        f.write_text(patched)
+        print(f"activeThumbColor replacements made: {n}")
+        if n == 0:
+            for i, line in enumerate(text.splitlines(), 1):
+                if 'activeThumbColor' in line or 'ThumbColor' in line:
+                    print(f"  line {i}: {line.rstrip()}")
+            import sys; sys.exit(1)
+        EOF
 
     - name: Build iOS (unsigned)
       run: flutter build ios --release --no-codesign
