@@ -58,6 +58,13 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
+    # FIX: Bump compileSdk to 36 so flutter_sharing_intent can compile
+    - name: Patch compileSdk to 36
+      run: |
+        sed -i 's/compileSdk = 35/compileSdk = 36/' android/app/build.gradle.kts
+        echo "--- android/app/build.gradle.kts (compileSdk line) ---"
+        grep 'compileSdk' android/app/build.gradle.kts
+
     - name: Decode keystore
       run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
 
@@ -183,6 +190,19 @@ jobs:
     - name: Get dependencies
       run: flutter pub get
 
+    # FIX: Replace activeThumbColor with WidgetStateProperty-based thumbColor
+    # activeThumbColor was removed in Flutter 3.x; use thumbColor with WidgetStateProperty instead
+    - name: Patch activeThumbColor in iptv_pt_screen.dart
+      shell: pwsh
+      run: |
+        $file = "lib/features/iptv/portal_search/screens/iptv_pt_screen.dart"
+        $content = Get-Content $file -Raw
+        $content = $content -replace `
+          'activeThumbColor:\s*const Color\(0xFF00E5FF\),', `
+          'thumbColor: WidgetStateProperty.resolveWith<Color?>((states) { if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF); return null; }),'
+        Set-Content $file $content
+        Write-Host "Patch applied."
+
     - name: Build Windows app
       run: flutter build windows --release
 
@@ -225,6 +245,15 @@ jobs:
 
     - name: Get dependencies
       run: flutter pub get
+
+    # FIX: Replace activeThumbColor with WidgetStateProperty-based thumbColor
+    # activeThumbColor was removed in Flutter 3.x; use thumbColor with WidgetStateProperty instead
+    - name: Patch activeThumbColor in iptv_pt_screen.dart
+      run: |
+        sed -i '' \
+          's/activeThumbColor: const Color(0xFF00E5FF),/thumbColor: WidgetStateProperty.resolveWith<Color?>((states) { if (states.contains(WidgetState.selected)) return const Color(0xFF00E5FF); return null; }),/' \
+          lib/features/iptv/portal_search/screens/iptv_pt_screen.dart
+        echo "Patch applied."
 
     - name: Build iOS (unsigned)
       run: flutter build ios --release --no-codesign
